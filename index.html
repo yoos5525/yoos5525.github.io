@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ファイル共有</title>
+<style>
+  body { font-family: "Segoe UI","Hiragino Sans",sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; background: #f5f6fa; color: #222; }
+  h1 { font-size: 1.4rem; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .hidden { display: none; }
+  input[type="email"], input[type="password"], input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 10px; border: 1px solid #ccd; border-radius: 6px; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; background: #5865f2; color: #fff; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  button.danger { background: #e74c3c; }
+  button.ghost { background: #888; }
+  #dropZone { border: 2px dashed #a0a8c0; text-align: center; }
+  #dropZone.dragover { background: #eef1ff; border-color: #5865f2; }
+  #fileInput { display: none; }
+  label.file-label { display: inline-block; padding: 10px 20px; background: #5865f2; color: #fff; border-radius: 6px; cursor: pointer; margin-top: 8px; }
+  ul { list-style: none; padding: 0; }
+  li { background: #fff; padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .file-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px; }
+  .file-size { color: #888; font-size: .85rem; margin-left: 8px; }
+  .actions button { margin-left: 6px; font-size: .85rem; padding: 6px 10px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .msg { margin-top: 8px; font-size: .9rem; color: #555; }
+  .banner { background: #fff7e0; border: 1px solid #f0c040; }
+  .ok-text { color: #22a559; font-size: .9rem; }
+  .small { font-size: .85rem; color: #666; }
+  #qrImg { width: 200px; height: 200px; display: block; margin: 10px auto; background: #fff; }
+  #secretText { word-break: break-all; font-family: monospace; font-size: .85rem; }
+  .code-input { text-align: center; letter-spacing: .3em; font-size: 1.2rem; }
+</style>
+</head>
+<body>
+  <h1>📁 ファイル共有</h1>
+
+  <!-- ログイン画面 -->
+  <div id="loginView" class="card hidden">
+    <input type="email" id="email" placeholder="メールアドレス" autocomplete="username">
+    <input type="password" id="password" placeholder="パスワード" autocomplete="current-password">
+    <button id="loginBtn">ログイン</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <!-- 2要素認証コード入力画面（ログイン後、2段階目） -->
+  <div id="mfaView" class="card hidden">
+    <p>認証アプリに表示されている6桁のコードを入力してください。</p>
+    <input type="text" id="mfaCode" class="code-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+    <button id="mfaVerifyBtn">確認</button>
+    <button class="ghost" id="mfaLogoutBtn">ログアウト</button>
+    <div id="mfaMsg" class="msg"></div>
+  </div>
+
+  <!-- アプリ画面 -->
+  <div id="appView" class="hidden">
+    <div class="top">
+      <span id="userEmail"></span>
+      <span>
+        <span id="mfaStatus" class="ok-text hidden">🔒 2段階認証: 有効</span>
+        <button class="ghost" id="logoutBtn">ログアウト</button>
+      </span>
+    </div>
+    <br>
+
+    <!-- 2段階認証が未設定のときの案内 -->
+    <div id="mfaBanner" class="card banner hidden">
+      <p>⚠️ 2段階認証が未設定です。</p>
+      <button id="enrollBtn">2段階認証を設定する</button>
+    </div>
+
+    <!-- 2段階認証の登録パネル -->
+    <div id="enrollPanel" class="card hidden">
+      <p>① 認証アプリ（Google Authenticator、Microsoft Authenticator など）で、下のQRコードを読み取ってください。</p>
+      <img id="qrImg" alt="2段階認証のQRコード">
+      <p class="small">読み取れない場合は、次のキーをアプリに手入力してください:<br><span id="secretText"></span></p>
+      <p>② アプリに表示された6桁のコードを入力してください。</p>
+      <input type="text" id="enrollCode" class="code-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+      <button id="enrollVerifyBtn">有効にする</button>
+      <button class="ghost" id="enrollCancelBtn">キャンセル</button>
+      <div id="enrollMsg" class="msg"></div>
+    </div>
+
+    <div class="card" id="dropZone">
+      <p>ここにファイルをドラッグ＆ドロップ、またはボタンから選択</p>
+      <label class="file-label" for="fileInput">ファイルを選択</label>
+      <input type="file" id="fileInput">
+      <div id="fileName"></div>
+      <br>
+      <button id="uploadBtn" disabled>アップロード</button>
+      <div id="status" class="msg"></div>
+    </div>
+
+    <h2>アップロード済みファイル</h2>
+    <ul id="fileList"></ul>
+
+    <p class="small"><button class="ghost hidden" id="disableMfaBtn">2段階認証を解除する</button></p>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ★ Supabaseダッシュボードの Project Settings → API で確認した値に置き換えてください
+// （anon / publishable key のみ。service_role key は絶対に書かないこと）
+const SUPABASE_URL = 'https://wggkbvrzjaonbdqmadmm.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_pLUnrEy9uL-wMFSMGqPj1Q_tns7r1ol';
+const BUCKET = 'files';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+
+let selectedFile = null;
+let pendingFactorId = null; // 登録途中のMFA要素ID
+
+// ---- ファイル名の変換 ----
+// 日本語など非ASCIIのファイル名はStorageのキーで問題になることがあるため、
+// 元のファイル名をbase64urlにしてキーに埋め込む
+function encodeName(name) {
+  const bytes = new TextEncoder().encode(name);
+  let bin = '';
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeName(enc) {
+  try {
+    const b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(b64 + '='.repeat((4 - b64.length % 4) % 4));
+    return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+  } catch { return enc; }
+}
+function originalName(key) { return decodeName(key.substring(key.indexOf('_') + 1)); }
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// ---- 画面の切り替え ----
+function show(name) {
+  ['loginView', 'mfaView', 'appView'].forEach(v => $(v).classList.toggle('hidden', v !== name));
+}
+
+// 認証状態に応じて、ログイン / コード入力 / アプリ のどれを出すか決める
+let routeSeq = 0;
+async function route() {
+  const seq = ++routeSeq;
+  const { data: { session } } = await sb.auth.getSession();
+  if (seq !== routeSeq) return;
+
+  if (!session) { show('loginView'); return; }
+
+  const { data: aal, error } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (seq !== routeSeq) return;
+  if (error) { show('loginView'); $('msg').textContent = `❌ ${error.message}`; return; }
+
+  // 2要素認証が登録済みで、まだコードを入力していない状態
+  if (aal.currentLevel === 'aal1' && aal.nextLevel === 'aal2') {
+    if ($('mfaView').classList.contains('hidden')) {
+      $('mfaCode').value = '';
+      $('mfaMsg').textContent = '';
+    }
+    show('mfaView');
+    $('mfaCode').focus();
+    return;
+  }
+
+  // アプリ画面
+  show('appView');
+  $('userEmail').textContent = session.user.email;
+  const mfaOn = aal.currentLevel === 'aal2';
+  $('mfaStatus').classList.toggle('hidden', !mfaOn);
+  $('disableMfaBtn').classList.toggle('hidden', !mfaOn);
+  // 未設定のときだけ案内を出す（登録パネルを開いている間は案内を隠す）
+  const enrolling = !$('enrollPanel').classList.contains('hidden');
+  $('mfaBanner').classList.toggle('hidden', mfaOn || enrolling);
+  loadFileList();
+}
+
+// ---- ログイン / ログアウト ----
+$('loginBtn').addEventListener('click', async () => {
+  $('msg').textContent = 'ログイン中...';
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('password').value
+  });
+  if (error) { $('msg').textContent = '❌ ログインに失敗しました'; return; }
+  $('msg').textContent = '';
+  $('password').value = '';
+  route();
+});
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+async function logout() {
+  await sb.auth.signOut();
+  route();
+}
+$('logoutBtn').addEventListener('click', logout);
+$('mfaLogoutBtn').addEventListener('click', logout);
+
+// ---- ログイン時の2段階目（6桁コード入力）----
+async function verifyLoginCode() {
+  const code = $('mfaCode').value.trim();
+  if (!/^\d{6}$/.test(code)) { $('mfaMsg').textContent = '6桁の数字を入力してください'; return; }
+  $('mfaMsg').textContent = '確認中...';
+
+  const { data: factors, error: e1 } = await sb.auth.mfa.listFactors();
+  const factor = factors?.totp?.[0];
+  if (e1 || !factor) { $('mfaMsg').textContent = '❌ 認証要素が見つかりません'; return; }
+
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+  if (error) { $('mfaMsg').textContent = '❌ コードが正しくありません'; $('mfaCode').value = ''; return; }
+  $('mfaMsg').textContent = '';
+  route();
+}
+$('mfaVerifyBtn').addEventListener('click', verifyLoginCode);
+$('mfaCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyLoginCode(); });
+
+// ---- 2段階認証の登録 ----
+$('enrollBtn').addEventListener('click', async () => {
+  $('enrollMsg').textContent = '準備中...';
+  $('enrollCode').value = '';
+  $('enrollPanel').classList.remove('hidden');
+  $('mfaBanner').classList.add('hidden');
+
+  // 前回の途中で放置された未確認の要素があれば片付ける
+  const { data: lf } = await sb.auth.mfa.listFactors();
+  for (const f of (lf?.all || [])) {
+    if (f.factor_type === 'totp' && f.status === 'unverified') {
+      await sb.auth.mfa.unenroll({ factorId: f.id });
+    }
+  }
+
+  const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp' });
+  if (error) { $('enrollMsg').textContent = `❌ ${error.message}`; return; }
+
+  pendingFactorId = data.id;
+  $('qrImg').src = data.totp.qr_code;
+  $('secretText').textContent = data.totp.secret;
+  $('enrollMsg').textContent = '';
+  $('enrollCode').focus();
+});
+
+async function verifyEnrollCode() {
+  const code = $('enrollCode').value.trim();
+  if (!pendingFactorId) return;
+  if (!/^\d{6}$/.test(code)) { $('enrollMsg').textContent = '6桁の数字を入力してください'; return; }
+  $('enrollMsg').textContent = '確認中...';
+
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: pendingFactorId, code });
+  if (error) { $('enrollMsg').textContent = '❌ コードが正しくありません'; $('enrollCode').value = ''; return; }
+
+  pendingFactorId = null;
+  $('qrImg').removeAttribute('src');
+  $('secretText').textContent = '';
+  $('enrollPanel').classList.add('hidden');
+  route();
+}
+$('enrollVerifyBtn').addEventListener('click', verifyEnrollCode);
+$('enrollCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyEnrollCode(); });
+
+$('enrollCancelBtn').addEventListener('click', async () => {
+  if (pendingFactorId) {
+    await sb.auth.mfa.unenroll({ factorId: pendingFactorId });
+    pendingFactorId = null;
+  }
+  $('qrImg').removeAttribute('src');
+  $('secretText').textContent = '';
+  $('enrollPanel').classList.add('hidden');
+  route();
+});
+
+// ---- 2段階認証の解除（機種変更などの前に）----
+$('disableMfaBtn').addEventListener('click', async () => {
+  if (!confirm('2段階認証を解除しますか？解除後は、再度設定するまでファイルの操作ができなくなる場合があります。')) return;
+  const { data } = await sb.auth.mfa.listFactors();
+  for (const f of (data?.totp || [])) {
+    const { error } = await sb.auth.mfa.unenroll({ factorId: f.id });
+    if (error) { alert(`解除に失敗しました: ${error.message}`); return; }
+  }
+  await sb.auth.refreshSession();
+  route();
+});
+
+// 認証状態の変化に追従（コールバック内で直接Supabaseを呼ぶと詰まることがあるため、setTimeoutで逃がす）
+sb.auth.onAuthStateChange(() => setTimeout(route, 0));
+route();
+
+// ---- ファイル選択 ----
+function setSelectedFile(file) {
+  selectedFile = file;
+  $('fileName').textContent = file ? `選択中: ${file.name}` : '';
+  $('uploadBtn').disabled = !file;
+}
+$('fileInput').addEventListener('change', (e) => setSelectedFile(e.target.files[0]));
+
+const dz = $('dropZone');
+['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('dragover'); }));
+dz.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) setSelectedFile(e.dataTransfer.files[0]); });
+
+// ---- アップロード ----
+$('uploadBtn').addEventListener('click', async () => {
+  if (!selectedFile) return;
+  $('status').textContent = 'アップロード中...';
+  $('uploadBtn').disabled = true;
+
+  const key = `${Date.now()}_${encodeName(selectedFile.name)}`;
+  const { error } = await sb.storage.from(BUCKET).upload(key, selectedFile, {
+    contentType: selectedFile.type || 'application/octet-stream'
+  });
+
+  if (error) {
+    $('status').textContent = `❌ ${error.message}`;
+    $('uploadBtn').disabled = false;
+    return;
+  }
+  $('status').textContent = '✅ アップロード完了';
+  setSelectedFile(null);
+  $('fileInput').value = '';
+  loadFileList();
+});
+
+// ---- 一覧 ----
+async function loadFileList() {
+  const { data, error } = await sb.storage.from(BUCKET).list('', {
+    limit: 100,
+    sortBy: { column: 'created_at', order: 'desc' }
+  });
+  const ul = $('fileList');
+  ul.innerHTML = '';
+
+  if (error) {
+    const li = document.createElement('li');
+    li.textContent = `❌ ${error.message}`;
+    ul.appendChild(li);
+    return;
+  }
+  const files = (data || []).filter(f => f.name !== '.emptyFolderPlaceholder');
+  if (files.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = 'まだファイルがありません';
+    ul.appendChild(li);
+    return;
+  }
+
+  files.forEach(f => {
+    const li = document.createElement('li');
+
+    const info = document.createElement('span');
+    info.className = 'file-info';
+    info.textContent = originalName(f.name);
+    const size = document.createElement('span');
+    size.className = 'file-size';
+    size.textContent = `(${formatSize(f.metadata?.size ?? 0)})`;
+    info.appendChild(size);
+
+    const actions = document.createElement('span');
+    actions.className = 'actions';
+    const dl = document.createElement('button');
+    dl.textContent = 'ダウンロード';
+    dl.onclick = () => downloadFile(f.name);
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.textContent = '削除';
+    del.onclick = () => deleteFile(f.name);
+    actions.append(dl, del);
+
+    li.append(info, actions);
+    ul.appendChild(li);
+  });
+}
+
+// ---- ダウンロード（60秒だけ有効な署名付きURLを発行）----
+async function downloadFile(key) {
+  const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(key, 60, {
+    download: originalName(key)
+  });
+  if (error) { alert(`ダウンロードに失敗: ${error.message}`); return; }
+  window.location.href = data.signedUrl;
+}
+
+// ---- 削除 ----
+async function deleteFile(key) {
+  if (!confirm('このファイルを削除しますか？')) return;
+  const { error } = await sb.storage.from(BUCKET).remove([key]);
+  if (error) { alert(`削除に失敗: ${error.message}`); return; }
+  loadFileList();
+}
+</script>
+</body>
+</html>
