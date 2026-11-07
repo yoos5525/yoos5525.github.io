@@ -206,16 +206,24 @@ async function login() {
 
 // ※ サインアップは用意していません(招待制)。アカウント作成は README の SQL を管理者が実行します
 
+// onAuthStateChange はログイン時に複数回発火する(INITIAL_SESSION + SIGNED_IN)ため、
+// loadFileList が並走して同じファイルを2回描画する事故を防ぐガード
+let shownUserId = null;
+
 function showApp(user) {
   userLabel.textContent = `👤 ${displayNameOf(user)}`;
   authView.hidden = true;
   appView.hidden = false;
-  loadFileList();
+  if (shownUserId !== user.id) {
+    shownUserId = user.id;
+    loadFileList();
+  }
 }
 
 function showAuth() {
   appView.hidden = true;
   authView.hidden = false;
+  shownUserId = null;
 }
 
 loginBtn.addEventListener('click', login);
@@ -332,12 +340,18 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+let listToken = 0;
+
 async function loadFileList() {
-  fileListEl.innerHTML = '';
+  const token = ++listToken; // より新しい一覧取得が始まったらこの結果は破棄する
 
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .list('', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
+
+  if (token !== listToken) return; // 後から開始された取得の方が新しなら描画しない
+
+  fileListEl.innerHTML = '';
 
   if (error) {
     statusDiv.textContent = `❌ 一覧取得失敗: ${error.message}`;
